@@ -1,22 +1,10 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Literal
-
+from app.schemas.menu import CalcIn, MenuItem
 router = APIRouter()
 
-class CalcIn(BaseModel):
-    sex: Literal["male","female"]
-    height_cm: int
-    weight_kg: float
-    age: int
-    activity: Literal["sedentary","light","moderate","high"]
-    goal: Literal["loss","maintain","gain"]
 
-class MenuItem(BaseModel):
-    id: int
-    title: str
-    calories: int
-    items: list[str]
 
 def activity_multiplier(a: str) -> float:
     return {
@@ -38,7 +26,7 @@ def calculate(data: CalcIn):
     gain = round(tdee * 1.15)
 
     sample_menu = {
-        "loss": MenuItem(id=1, title="Меню для похудения", calories=loss, items=["Овсянка 50g","Куриное филе 100g"]).dict(),
+        "loss": c(id=1, title="Меню для похудения", calories=loss, items=["Овсянка 50g","Куриное филе 100g"]).dict(),
         "maintain": MenuItem(id=2, title="Меню для поддержания", calories=maintain, items=["Гречка 100g","Рыба 150g"]).dict(),
         "gain": MenuItem(id=3, title="Меню для набора", calories=gain, items=["Рис 200g","Говядина 200g"]).dict(),
     }
