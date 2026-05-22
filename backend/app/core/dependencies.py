@@ -4,19 +4,13 @@ from app.core.security import verify_token
 from sqlalchemy.orm import sessionmaker
 from app.models.user import User
 from sqlalchemy import create_engine
-import os
+# import os
+from app.core.config import settings
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/appdb"
-)
-
-engine = create_engine(DATABASE_URL, future=True)
+engine = create_engine(settings.DATABASE_URL, future=True)
 
 security = HTTPBearer()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
 
 def get_db():
     db = SessionLocal()

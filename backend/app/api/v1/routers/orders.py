@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 router = APIRouter()
 
 
-
-from app.schemas.order import Order, OrderCreate, OrderResponse, OrderItem
+from app.models.order import Order
+from app.schemas.order import OrderCreate, OrderResponse, OrderItem
 
 @router.post("/create", response_model=OrderResponse)
 def create_order(
@@ -18,7 +18,6 @@ def create_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Создать новый заказ"""
     
     total_amount = sum(item.price * item.quantity for item in order_data.items)
     
@@ -54,7 +53,6 @@ def get_my_orders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получить заказы текущего пользователя"""
     orders = db.query(Order).filter(Order.user_id == current_user.id).all()
     return orders
 
@@ -64,7 +62,6 @@ def get_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получить детали заказа"""
     order = db.query(Order).filter(
         Order.id == order_id, 
         Order.user_id == current_user.id
@@ -81,7 +78,6 @@ def cancel_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Отменить заказ"""
     order = db.query(Order).filter(
         Order.id == order_id, 
         Order.user_id == current_user.id

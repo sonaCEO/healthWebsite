@@ -1,144 +1,203 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 from typing import List, Optional
-from app.core.dependencies import get_current_user, get_db
-from app.models.user import User
 from sqlalchemy.orm import Session
-from app.schemas.recipes import RecipeResponse, Ingredient, RecipeSearch
-
+from sqlalchemy import asc, desc
+from app.core.dependencies import get_db
+from app.models.recipe import Recipe
+from app.schemas.recipes import RecipeResponse, RecipeSearch
+from collections import Counter
+import json
+from pydantic import BaseModel
 
 router = APIRouter()
 
-SAMPLE_RECIPES = [
-    RecipeResponse(
-        id=1,
-        title="Гречневая каша с курицей",
-        description="Питательная гречневая каша с нежным куриным филе",
-        ingredients=[
-            Ingredient(name="Гречка", amount="100", unit="г"),
-            Ingredient(name="Куриное филе", amount="150", unit="г"),
-            Ingredient(name="Лук репчатый", amount="1", unit="шт"),
-            Ingredient(name="Морковь", amount="1", unit="шт"),
-            Ingredient(name="Оливковое масло", amount="1", unit="ст.л")
-        ],
-        instructions=[
-            "Промойте гречку и отварите до готовности",
-            "Нарежьте куриное филе кубиками и обжарьте на сковороде",
-            "Добавьте нарезанные лук и морковь, тушите 10 минут",
-            "Смешайте гречку с курицей и овощами",
-            "Подавайте горячим"
-        ],
-        cooking_time=30,
-        calories=350,
-        protein=25,
-        carbs=45,
-        fat=8,
-        category="main",
-        difficulty="easy",
-        tags=["гречка", "курица", "здоровое", "обед"]
-    ),
-    RecipeResponse(
-        id=2,
-        title="Овсянка с ягодами",
-        description="Полезный завтрак с овсянкой и свежими ягодами",
-        ingredients=[
-            Ingredient(name="Овсяные хлопья", amount="50", unit="г"),
-            Ingredient(name="Молоко", amount="200", unit="мл"),
-            Ingredient(name="Мед", amount="1", unit="ч.л"),
-            Ingredient(name="Смесь ягод", amount="100", unit="г")
-        ],
-        instructions=[
-            "Доведите молоко до кипения",
-            "Добавьте овсяные хлопья и варите 5-7 минут",
-            "Добавьте мед и перемешайте",
-            "Украсьте ягодами перед подачей"
-        ],
-        cooking_time=10,
-        calories=250,
-        protein=10,
-        carbs=45,
-        fat=5,
-        category="breakfast",
-        difficulty="very_easy",
-        tags=["овсянка", "завтрак", "ягоды", "быстро"]
-    )
-]
 
-@router.get("/", response_model=List[RecipeResponse])
+# схема пагинации
+class PaginatedRecipes(BaseModel):
+    items: List[RecipeResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+    class Config:
+        from_attributes = True
+
+
+def recipe_to_response(recipe: Recipe) -> RecipeResponse:
+    # Конвертируем модель БД в схему ответа
+    return RecipeResponse(
+        id=recipe.id,
+        title=recipe.title,
+        description=recipe.description,
+        ingredients=(
+            json.loads(recipe.ingredients)
+            if isinstance(recipe.ingredients, str)
+            else recipe.ingredients
+        ),
+        instructions=(
+            json.loads(recipe.instructions)
+            if isinstance(recipe.instructions, str)
+            else recipe.instructions
+        ),
+        cooking_time=recipe.cooking_time,
+        calories=recipe.calories,
+        protein=recipe.protein,
+        carbs=recipe.carbs,
+        fat=recipe.fat,
+        category=recipe.category,
+        difficulty=recipe.difficulty,
+        image_url=recipe.image_url,
+        tags=(
+            json.loads(recipe.tags)
+            if isinstance(recipe.tags, str)
+            else recipe.tags or []
+        ),
+    )
+
+
+# @router.get("/", response_model=List[RecipeResponse])
+@router.get("/", response_model=PaginatedRecipes)
 def get_all_recipes(
+    # Фильтрация
     category: Optional[str] = Query(None, description="Фильтр по категории"),
-    max_cooking_time: Optional[int] = Query(None, description="Максимальное время готовки"),
-    tags: Optional[str] = Query(None, description="Теги через запятую")
+    difficulty: Optional[str] = Query(None, description="Фильтр по сложности"),
+    max_cooking_time: Optional[int] = Query(
+        None, description="Макс. время готовки (мин)"
+    ),
+    max_calories: Optional[int] = Query(None, description="Макс. калорийность"),
+    min_protein: Optional[int] = Query(None, description="Мин. белки (г)"),
+    tags: Optional[str] = Query(None, description="Теги через запятую"),
+    search: Optional[str] = Query(None, description="Поиск по названию и описанию"),
+    # Сортировка
+    sort_by: Optional[str] = Query(
+        "id", description="Поле сортировки: id, calories, cooking_time, protein"
+    ),
+    sort_order: Optional[str] = Query("asc", description="Порядок: asc или desc"),
+    # Пагинация
+    page: int = Query(1, ge=1, description="Номер страницы"),
+    page_size: int = Query(6, ge=1, le=50, description="Размер страницы"),
+    db: Session = Depends(get_db),
 ):
-    """Получить все рецепты с фильтрацией"""
-    recipes = SAMPLE_RECIPES.copy()
-    
-    # Фильтрация по категории
+    query = db.query(Recipe).filter(Recipe.is_active == 1)
+
+    # Фильтрация
     if category:
-        recipes = [r for r in recipes if r.category == category]
-    
-    # Фильтрация по времени готовки
+        query = query.filter(Recipe.category == category)
+    if difficulty:
+        query = query.filter(Recipe.difficulty == difficulty)
     if max_cooking_time:
-        recipes = [r for r in recipes if r.cooking_time <= max_cooking_time]
-    
-    # Фильтрация по тегам
+        query = query.filter(Recipe.cooking_time <= max_cooking_time)
+    if max_calories:
+        query = query.filter(Recipe.calories <= max_calories)
+    if min_protein:
+        query = query.filter(Recipe.protein >= min_protein)
+    if search:
+        query = query.filter(
+            Recipe.title.ilike(f"%{search}%") | Recipe.description.ilike(f"%{search}%")
+        )
+
+    # Сортировка
+    sort_fields = {
+        "id": Recipe.id,
+        "calories": Recipe.calories,
+        "cooking_time": Recipe.cooking_time,
+        "protein": Recipe.protein,
+    }
+    sort_field = sort_fields.get(sort_by, Recipe.id)
+    if sort_order == "desc":
+        query = query.order_by(desc(sort_field))
+    else:
+        query = query.order_by(asc(sort_field))
+
+    # Считаем общее количество до пагинации
+    total = query.count()
+
+    # Пагинация
+    offset = (page - 1) * page_size
+    recipes = query.offset(offset).limit(page_size).all()
+
+    # Фильтрация по тегам (после запроса, т.к. теги в JSON)
     if tags:
         tag_list = [tag.strip().lower() for tag in tags.split(",")]
-        recipes = [r for r in recipes if any(tag in r.tags for tag in tag_list)]
-    
-    return recipes
+        recipes = [
+            r
+            for r in recipes
+            if any(
+                tag in (json.loads(r.tags) if isinstance(r.tags, str) else r.tags or [])
+                for tag in tag_list
+            )
+        ]
+        total = len(recipes)
+
+    return PaginatedRecipes(
+        items=[recipe_to_response(r) for r in recipes],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=(total + page_size - 1) // page_size,
+    )
+
 
 @router.get("/{recipe_id}", response_model=RecipeResponse)
-def get_recipe(recipe_id: int):
-    """Получить рецепт по ID"""
-    recipe = next((r for r in SAMPLE_RECIPES if r.id == recipe_id), None)
+def get_recipe(recipe_id: int, db: Session = Depends(get_db)):
+    recipe = (
+        db.query(Recipe).filter(Recipe.id == recipe_id, Recipe.is_active == 1).first()
+    )
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return recipe
+    return recipe_to_response(recipe)
 
-@router.post("/search", response_model=List[RecipeResponse])
-def search_recipes(search: RecipeSearch):
-    """Поиск рецептов по различным критериям"""
-    recipes = SAMPLE_RECIPES.copy()
-    
-    # Поиск по тексту
-    if search.query:
-        query = search.query.lower()
-        recipes = [r for r in recipes if query in r.title.lower() or query in r.description.lower()]
-    
-    # Фильтрация по категории
-    if search.category:
-        recipes = [r for r in recipes if r.category == search.category]
-    
-    # Фильтрация по времени готовки
-    if search.max_cooking_time:
-        recipes = [r for r in recipes if r.cooking_time <= search.max_cooking_time]
-    
-    # Фильтрация по калориям
-    if search.max_calories:
-        recipes = [r for r in recipes if r.calories <= search.max_calories]
-    
-    # Фильтрация по тегам
-    if search.tags:
-        recipes = [r for r in recipes if any(tag in r.tags for tag in search.tags)]
-    
-    return recipes
 
 @router.get("/categories/list")
-def get_categories():
-    """Получить список всех категорий рецептов"""
-    categories = list(set(recipe.category for recipe in SAMPLE_RECIPES))
+def get_categories(db: Session = Depends(get_db)):
+    recipes = db.query(Recipe).filter(Recipe.is_active == 1).all()
+    categories = list(set(r.category for r in recipes))
     return {"categories": categories}
 
+
 @router.get("/tags/popular")
-def get_popular_tags():
-    """Получить популярные теги"""
+def get_popular_tags(db: Session = Depends(get_db)):
+    recipes = db.query(Recipe).filter(Recipe.is_active == 1).all()
     all_tags = []
-    for recipe in SAMPLE_RECIPES:
-        all_tags.extend(recipe.tags)
-    
-    # Считаем популярность тегов
-    from collections import Counter
+    for recipe in recipes:
+        tags = (
+            json.loads(recipe.tags)
+            if isinstance(recipe.tags, str)
+            else recipe.tags or []
+        )
+        all_tags.extend(tags)
     popular_tags = Counter(all_tags).most_common(10)
-    
     return {"tags": [tag for tag, count in popular_tags]}
+
+
+@router.post("/search", response_model=List[RecipeResponse])
+def search_recipes(search: RecipeSearch, db: Session = Depends(get_db)):
+    query = db.query(Recipe).filter(Recipe.is_active == 1)
+
+    if search.category:
+        query = query.filter(Recipe.category == search.category)
+    if search.max_cooking_time:
+        query = query.filter(Recipe.cooking_time <= search.max_cooking_time)
+    if search.max_calories:
+        query = query.filter(Recipe.calories <= search.max_calories)
+
+    recipes = query.all()
+
+    if search.query:
+        q = search.query.lower()
+        recipes = [
+            r for r in recipes if q in r.title.lower() or q in r.description.lower()
+        ]
+
+    if search.tags:
+        recipes = [
+            r
+            for r in recipes
+            if any(
+                tag in (json.loads(r.tags) if isinstance(r.tags, str) else r.tags or [])
+                for tag in search.tags
+            )
+        ]
+
+    return [recipe_to_response(r) for r in recipes]
