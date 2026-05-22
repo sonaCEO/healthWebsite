@@ -9,8 +9,10 @@ from app.core.security import get_password_hash
 from app.models.user import User
 from app.models.recipe import Recipe
 from app.models.article import Article
+import os
 
-TEST_DATABASE_URL = "postgresql://sona@localhost/appdb_test"
+# TEST_DATABASE_URL = "postgresql://sona@localhost/appdb_test"
+TEST_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://sona@localhost/appdb_test")
 
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
