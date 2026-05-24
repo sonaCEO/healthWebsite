@@ -3,6 +3,7 @@ from app.models.user import User
 from app.models.recipe import Recipe
 from app.models.article import Article
 from app.models.menu import MenuPlan
+from app.models.refresh_token import RefreshToken
 from app.models.order import Order, OrderItem
 from app.core.security import get_password_hash
 from datetime import datetime
@@ -12,6 +13,7 @@ import json
 def populate_database():
     db = SessionLocal()
     try:
+        db.query(RefreshToken).delete()
         db.query(MenuPlan).delete()
         db.query(Article).delete()
         db.query(Recipe).delete()
